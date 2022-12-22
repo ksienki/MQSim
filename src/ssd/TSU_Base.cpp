@@ -69,6 +69,65 @@ namespace SSD_Components
 	{
 	}
 
+	void TSU_Base::reorderQueue(Flash_Transaction_Queue* queue) {
+		Transaction_Source_Type previousTrans{};
+		bool found = true;
+
+		for (Flash_Transaction_Queue::iterator it = queue->begin(); it != queue->end(); it++) {
+			switch ((*it)->Source) {
+			case Transaction_Source_Type::USERIO: {
+				bool prevUser = (previousTrans == Transaction_Source_Type::USERIO);
+
+				if (prevUser && found) {
+					for (Flash_Transaction_Queue::iterator jt = queue->begin(); jt != queue->end(); jt++) {
+						found = false;
+
+						bool isGCWL = ((*jt)->Source) == Transaction_Source_Type::GC_WL;
+
+						if (isGCWL) {
+							bool notUrgent = !(this->ftl->GC_and_WL_Unit->GC_is_in_urgent_mode(_NVMController->Get_chip((*jt)->Address.ChannelID, (*jt)->Address.ChipID)));
+
+							if (notUrgent) {
+								found = true;
+
+								queue->insert(it, *jt);
+								queue->remove(jt);
+
+								break;
+							}
+						}
+					}
+				}
+				break;
+			}
+			case Transaction_Source_Type::GC_WL: {
+				bool prevGCWL = (previousTrans == Transaction_Source_Type::GC_WL);
+				bool notUrgent = !(this->ftl->GC_and_WL_Unit->GC_is_in_urgent_mode(_NVMController->Get_chip((*it)->Address.ChannelID, (*it)->Address.ChipID)));
+
+				if (notUrgent && prevGCWL && found) {
+					for (Flash_Transaction_Queue::iterator jt = queue->begin(); jt != queue->end(); jt++) {
+						found = false;
+
+						if ((*jt)->Source == Transaction_Source_Type::USERIO) {
+							found = true;
+
+							queue->insert(it, *jt);
+							queue->remove(jt);
+
+							break;
+						}
+					}
+				}
+
+				break;
+			}
+			default: break;
+			}
+
+			previousTrans = (*it)->Source;
+		}
+	}
+
 	bool TSU_Base::issue_command_to_chip(Flash_Transaction_Queue *sourceQueue1, Flash_Transaction_Queue *sourceQueue2, Transaction_Type transactionType, bool suspensionRequired)
 	{
 		flash_die_ID_type dieID = sourceQueue1->front()->Address.DieID;
@@ -76,10 +135,21 @@ namespace SSD_Components
 		unsigned int planeVector = 0;
 		static int issueCntr = 0;
 		
+		reorderQueue(sourceQueue1);
+
+		NVM_Transaction_Flash* newest = sourceQueue1->front();
+
 		for (unsigned int i = 0; i < die_no_per_chip; i++)
 		{
 			transaction_dispatch_slots.clear();
 			planeVector = 0;
+
+			// Watch for changes in the sourceQueue
+			if (newest != sourceQueue1->front()) {
+				reorderQueue(sourceQueue1);
+
+				newest = sourceQueue1->front();
+			}
 
 			for (Flash_Transaction_Queue::iterator it = sourceQueue1->begin(); it != sourceQueue1->end();)
 			{
@@ -101,6 +171,8 @@ namespace SSD_Components
 
 			if (sourceQueue2 != NULL && transaction_dispatch_slots.size() < plane_no_per_die)
 			{
+				reorderQueue(sourceQueue2);
+
 				for (Flash_Transaction_Queue::iterator it = sourceQueue2->begin(); it != sourceQueue2->end();)
 				{
 					if (transaction_is_ready(*it) && (*it)->Address.DieID == dieID && !(planeVector & 1 << (*it)->Address.PlaneID))
