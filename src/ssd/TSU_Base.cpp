@@ -82,10 +82,14 @@ namespace SSD_Components
 		if (sourceQueue2 != NULL && transaction_dispatch_slots.size() < plane_no_per_die) {
 			switch (sourceQueue2->front()->Source) {
 				case Transaction_Source_Type::GC_WL:
+					/*
 					if (sourceQueue2->size() > sourceQueue1->size()) {
-						mainQueue = sourceQueue1;
-						subQueue = sourceQueue2;
-					}
+						mainQueue = sourceQueue2;
+						subQueue = sourceQueue1;
+
+						mainQueue->front() = subQueue->front();
+						subQueue->remove(subQueue->front());
+					}*/
 
 					for (Flash_Transaction_Queue::iterator it = mainQueue->begin(); it != mainQueue->end(); it++) {
 						int index = std::distance(mainQueue->begin(), it);
