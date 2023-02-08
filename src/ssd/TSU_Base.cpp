@@ -82,7 +82,7 @@ namespace SSD_Components
 			switch (sourceQueue2->front()->Source) 
 			{
 				case Transaction_Source_Type::GC_WL:
-				mixQueue = new Flash_Transaction_Queue *[channel_count];
+				mixQueue = new Flash_Transaction_Queue;
 
 				while (!sourceQueue1->empty() && !sourceQueue2->empty()) {
 					mixQueue->push_back(sourceQueue1->front());
@@ -102,7 +102,6 @@ namespace SSD_Components
 					sourceQueue2->remove(sourceQueue2->front());
 				}
 
-				mixQueue = sourceQueue1;
 				break;
 			default:
 				for (Flash_Transaction_Queue::iterator it = sourceQueue2->begin(); it != sourceQueue2->end(); it++) {
