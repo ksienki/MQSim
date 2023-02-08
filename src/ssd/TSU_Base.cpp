@@ -71,54 +71,60 @@ namespace SSD_Components
 
 	bool TSU_Base::issue_command_to_chip(Flash_Transaction_Queue* sourceQueue1, Flash_Transaction_Queue* sourceQueue2, Transaction_Type transactionType, bool suspensionRequired)
 	{
-		flash_die_ID_type dieID = sourceQueue1->front()->Address.DieID;
-		flash_page_ID_type pageID = sourceQueue1->front()->Address.PageID;
+		//flash_die_ID_type dieID = sourceQueue1->front()->Address.DieID;
+		//flash_page_ID_type pageID = sourceQueue1->front()->Address.PageID;
 		unsigned int planeVector = 0;
 		static int issueCntr = 0;
 
-		Flash_Transaction_Queue* mixQueue = sourceQueue1;
+		Flash_Transaction_Queue* mainQueue = sourceQueue1;
+		Flash_Transaction_Queue* subQueue = sourceQueue2;
 
 		if (sourceQueue2 != NULL && transaction_dispatch_slots.size() < plane_no_per_die) {
-			switch (sourceQueue2->front()->Source) 
-			{
+			switch (sourceQueue2->front()->Source) {
 				case Transaction_Source_Type::GC_WL:
-				mixQueue = new Flash_Transaction_Queue;
+					if (sourceQueue2->size() > sourceQueue1->size()) {
+						mainQueue = sourceQueue1;
+						subQueue = sourceQueue2;
+					}
 
-				while (!sourceQueue1->empty() && !sourceQueue2->empty()) {
-					mixQueue->push_back(sourceQueue1->front());
-					mixQueue->push_back(sourceQueue2->front());
+					for (Flash_Transaction_Queue::iterator it = mainQueue->begin(); it != mainQueue->end(); it++) {
+						int index = std::distance(mainQueue->begin(), it);
 
-					sourceQueue1->remove(sourceQueue1->front());
-					sourceQueue2->remove(sourceQueue2->front());
-				}
+						if (index % 2 && !subQueue->empty()) {
+							mainQueue->insert(it, subQueue->front());
+							subQueue->remove(subQueue->front());
+						}
 
-				while (!sourceQueue1->empty()) {
-					mixQueue->push_back(sourceQueue1->front());
-					sourceQueue1->remove(sourceQueue1->front());
-				}
+						if (subQueue->empty()) {
+							break;
+						}
+					}
 
-				while (!sourceQueue2->empty()) {
-					mixQueue->push_back(sourceQueue2->front());
-					sourceQueue2->remove(sourceQueue2->front());
-				}
-
+					while (!subQueue->empty()) {
+						mainQueue->push_back(subQueue->front());
+						subQueue->remove(subQueue->front());
+					}
+				
 				break;
 			default:
-				for (Flash_Transaction_Queue::iterator it = sourceQueue2->begin(); it != sourceQueue2->end(); it++) {
-					mixQueue->push_back(*it);
-					sourceQueue2->remove(it);
+				for (Flash_Transaction_Queue::iterator it = subQueue->begin(); it != subQueue->end(); it++) {
+					mainQueue->push_back(*it);
+					subQueue->remove(it);
 				}
+
 				break;
 			}
 		}
 
+		flash_die_ID_type dieID = mainQueue->front()->Address.DieID;
+		flash_page_ID_type pageID = mainQueue->front()->Address.PageID;
 
 		for (unsigned int i = 0; i < die_no_per_chip; i++)
 		{
 			transaction_dispatch_slots.clear();
 			planeVector = 0;
 				
-			for (Flash_Transaction_Queue::iterator it = mixQueue->begin(); it != mixQueue->end();) {
+			for (Flash_Transaction_Queue::iterator it = mainQueue->begin(); it != mainQueue->end();) {
 					if (transaction_is_ready(*it) && (*it)->Address.DieID == dieID && !(planeVector & 1 << (*it)->Address.PlaneID))
 					{
 						//Check for identical pages when running multiplane command
@@ -128,7 +134,7 @@ namespace SSD_Components
 							planeVector |= 1 << (*it)->Address.PlaneID;
 							transaction_dispatch_slots.push_back(*it);
 							DEBUG(issueCntr++ << ": " << Simulator->Time() << " Issueing Transaction - Type:" << TRTOSTR((*it)) << ", PPA:" << (*it)->PPA << ", LPA:" << (*it)->LPA << ", Channel: " << (*it)->Address.ChannelID << ", Chip: " << (*it)->Address.ChipID);
-							mixQueue->remove(it++);
+							mainQueue->remove(it++);
 							continue;
 						}
 					}
