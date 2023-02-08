@@ -57,7 +57,7 @@ namespace SSD_Components
 			}
 		}
 	}
-	
+
 	void TSU_Base::handle_chip_idle_signal(NVM::FlashMemory::Flash_Chip* chip)
 	{
 		if (_my_instance->_NVMController->Get_channel_status(chip->ChannelID) == BusChannelStatus::IDLE) {
@@ -69,112 +69,57 @@ namespace SSD_Components
 	{
 	}
 
-	void TSU_Base::reorderQueue(Flash_Transaction_Queue* queue) {
-		Transaction_Source_Type previousTrans{};
-		bool found = true;
-
-		for (Flash_Transaction_Queue::iterator it = queue->begin(); it != queue->end(); it++) {
-			switch ((*it)->Source) {
-			case Transaction_Source_Type::USERIO: {
-				bool prevUser = (previousTrans == Transaction_Source_Type::USERIO);
-
-				if (prevUser && found) {
-					for (Flash_Transaction_Queue::iterator jt = queue->begin(); jt != queue->end(); jt++) {
-						found = false;
-
-						bool isGCWL = ((*jt)->Source) == Transaction_Source_Type::GC_WL;
-
-						if (isGCWL) {
-							bool notUrgent = !(this->ftl->GC_and_WL_Unit->GC_is_in_urgent_mode(_NVMController->Get_chip((*jt)->Address.ChannelID, (*jt)->Address.ChipID)));
-
-							if (notUrgent) {
-								found = true;
-
-								queue->insert(it, *jt);
-								queue->remove(jt);
-
-								break;
-							}
-						}
-					}
-				}
-				break;
-			}
-			case Transaction_Source_Type::GC_WL: {
-				bool prevGCWL = (previousTrans == Transaction_Source_Type::GC_WL);
-				bool notUrgent = !(this->ftl->GC_and_WL_Unit->GC_is_in_urgent_mode(_NVMController->Get_chip((*it)->Address.ChannelID, (*it)->Address.ChipID)));
-
-				if (notUrgent && prevGCWL && found) {
-					for (Flash_Transaction_Queue::iterator jt = queue->begin(); jt != queue->end(); jt++) {
-						found = false;
-
-						if ((*jt)->Source == Transaction_Source_Type::USERIO) {
-							found = true;
-
-							queue->insert(it, *jt);
-							queue->remove(jt);
-
-							break;
-						}
-					}
-				}
-
-				break;
-			}
-			default: break;
-			}
-
-			previousTrans = (*it)->Source;
-		}
-	}
-
-	bool TSU_Base::issue_command_to_chip(Flash_Transaction_Queue *sourceQueue1, Flash_Transaction_Queue *sourceQueue2, Transaction_Type transactionType, bool suspensionRequired)
+	bool TSU_Base::issue_command_to_chip(Flash_Transaction_Queue* sourceQueue1, Flash_Transaction_Queue* sourceQueue2, Transaction_Type transactionType, bool suspensionRequired)
 	{
 		flash_die_ID_type dieID = sourceQueue1->front()->Address.DieID;
 		flash_page_ID_type pageID = sourceQueue1->front()->Address.PageID;
 		unsigned int planeVector = 0;
 		static int issueCntr = 0;
-		
-		reorderQueue(sourceQueue1);
 
-		NVM_Transaction_Flash* newest = sourceQueue1->front();
+		Flash_Transaction_Queue* mixQueue = sourceQueue1;
+
+		if (sourceQueue2 != NULL && transaction_dispatch_slots.size() < plane_no_per_die) {
+			switch (sourceQueue2->front()->Source) 
+			{
+				case Transaction_Source_Type::GC_WL:
+				mixQueue = new Flash_Transaction_Queue *[channel_count];
+
+				while (!sourceQueue1->empty() && !sourceQueue2->empty()) {
+					mixQueue->push_back(sourceQueue1->front());
+					mixQueue->push_back(sourceQueue2->front());
+
+					sourceQueue1->remove(sourceQueue1->front());
+					sourceQueue2->remove(sourceQueue2->front());
+				}
+
+				while (!sourceQueue1->empty()) {
+					mixQueue->push_back(sourceQueue1->front());
+					sourceQueue1->remove(sourceQueue1->front());
+				}
+
+				while (!sourceQueue2->empty()) {
+					mixQueue->push_back(sourceQueue2->front());
+					sourceQueue2->remove(sourceQueue2->front());
+				}
+
+				mixQueue = sourceQueue1;
+				break;
+			default:
+				for (Flash_Transaction_Queue::iterator it = sourceQueue2->begin(); it != sourceQueue2->end(); it++) {
+					mixQueue->push_back(*it);
+					sourceQueue2->remove(it);
+				}
+				break;
+			}
+		}
+
 
 		for (unsigned int i = 0; i < die_no_per_chip; i++)
 		{
 			transaction_dispatch_slots.clear();
 			planeVector = 0;
-
-			// Watch for changes in the sourceQueue
-			if (newest != sourceQueue1->front()) {
-				reorderQueue(sourceQueue1);
-
-				newest = sourceQueue1->front();
-			}
-
-			for (Flash_Transaction_Queue::iterator it = sourceQueue1->begin(); it != sourceQueue1->end();)
-			{
-				if (transaction_is_ready(*it) && (*it)->Address.DieID == dieID && !(planeVector & 1 << (*it)->Address.PlaneID))
-				{
-					//Check for identical pages when running multiplane command
-					if (planeVector == 0 || (*it)->Address.PageID == pageID)
-					{
-						(*it)->SuspendRequired = suspensionRequired;
-						planeVector |= 1 << (*it)->Address.PlaneID;
-						transaction_dispatch_slots.push_back(*it);
-						DEBUG(issueCntr++ << ": " << Simulator->Time() <<" Issueing Transaction - Type:" << TRTOSTR((*it)) << ", PPA:" << (*it)->PPA << ", LPA:" << (*it)->LPA << ", Channel: " << (*it)->Address.ChannelID << ", Chip: " << (*it)->Address.ChipID);
-						sourceQueue1->remove(it++);
-						continue;
-					}
-				}
-				it++;
-			}
-
-			if (sourceQueue2 != NULL && transaction_dispatch_slots.size() < plane_no_per_die)
-			{
-				reorderQueue(sourceQueue2);
-
-				for (Flash_Transaction_Queue::iterator it = sourceQueue2->begin(); it != sourceQueue2->end();)
-				{
+				
+			for (Flash_Transaction_Queue::iterator it = mixQueue->begin(); it != mixQueue->end();) {
 					if (transaction_is_ready(*it) && (*it)->Address.DieID == dieID && !(planeVector & 1 << (*it)->Address.PlaneID))
 					{
 						//Check for identical pages when running multiplane command
@@ -184,12 +129,11 @@ namespace SSD_Components
 							planeVector |= 1 << (*it)->Address.PlaneID;
 							transaction_dispatch_slots.push_back(*it);
 							DEBUG(issueCntr++ << ": " << Simulator->Time() << " Issueing Transaction - Type:" << TRTOSTR((*it)) << ", PPA:" << (*it)->PPA << ", LPA:" << (*it)->LPA << ", Channel: " << (*it)->Address.ChannelID << ", Chip: " << (*it)->Address.ChipID);
-							sourceQueue2->remove(it++);
+							mixQueue->remove(it++);
 							continue;
 						}
 					}
 					it++;
-				}
 			}
 
 			if (transaction_dispatch_slots.size() > 0)
@@ -204,7 +148,7 @@ namespace SSD_Components
 				transaction_dispatch_slots.clear();
 				dieID = (dieID + 1) % die_no_per_chip;
 				return false;
-			}			
+			}
 		}
 
 		return false;
