@@ -326,7 +326,7 @@ bool TSU_OutOfOrder::service_read_transaction(NVM::FlashMemory::Flash_Chip *chip
 		return false;
 	}
 
-	issue_command_to_chip(sourceQueue1, sourceQueue2, Transaction_Type::READ, suspensionRequired);
+	issue_command_to_chip(chip, sourceQueue1, sourceQueue2, Transaction_Type::READ, suspensionRequired);
 
 	return true;
 }
@@ -396,7 +396,7 @@ bool TSU_OutOfOrder::service_write_transaction(NVM::FlashMemory::Flash_Chip *chi
 		return false;
 	}
 
-	issue_command_to_chip(sourceQueue1, sourceQueue2, Transaction_Type::WRITE, suspensionRequired);
+	issue_command_to_chip(chip, sourceQueue1, sourceQueue2, Transaction_Type::WRITE, suspensionRequired);
 
 	return true;
 }
@@ -414,7 +414,7 @@ bool TSU_OutOfOrder::service_erase_transaction(NVM::FlashMemory::Flash_Chip *chi
 		return false;
 	}
 
-	issue_command_to_chip(source_queue, NULL, Transaction_Type::ERASE, false);
+	issue_command_to_chip(chip, source_queue, NULL, Transaction_Type::ERASE, false);
 
 	return true;
 }

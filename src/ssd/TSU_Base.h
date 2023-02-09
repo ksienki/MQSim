@@ -65,7 +65,7 @@ public:
 	virtual void Schedule() = 0;
 	virtual void Report_results_in_XML(std::string name_prefix, Utils::XmlWriter &xmlwriter);
 
-	void reorderQueue(Flash_Transaction_Queue* queue);
+	void move_queue_elemenets(Flash_Transaction_Queue* source, Flash_Transaction_Queue* target);
 
 protected:
 	FTL *ftl;
@@ -87,7 +87,7 @@ protected:
 	virtual bool service_read_transaction(NVM::FlashMemory::Flash_Chip *chip) = 0;
 	virtual bool service_write_transaction(NVM::FlashMemory::Flash_Chip *chip) = 0;
 	virtual bool service_erase_transaction(NVM::FlashMemory::Flash_Chip *chip) = 0;
-	bool issue_command_to_chip(Flash_Transaction_Queue *sourceQueue1, Flash_Transaction_Queue *sourceQueue2, Transaction_Type transactionType, bool suspensionRequired);
+	bool issue_command_to_chip(NVM::FlashMemory::Flash_Chip* chip, Flash_Transaction_Queue* sourceQueue1, Flash_Transaction_Queue* sourceQueue2, Transaction_Type transactionType, bool suspensionRequired);
 	static void handle_transaction_serviced_signal_from_PHY(NVM_Transaction_Flash *transaction);
 	static void handle_channel_idle_signal(flash_channel_ID_type);
 	static void handle_chip_idle_signal(NVM::FlashMemory::Flash_Chip *chip);

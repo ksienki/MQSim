@@ -69,54 +69,64 @@ namespace SSD_Components
 	{
 	}
 
-	bool TSU_Base::issue_command_to_chip(Flash_Transaction_Queue* sourceQueue1, Flash_Transaction_Queue* sourceQueue2, Transaction_Type transactionType, bool suspensionRequired)
+	void TSU_Base::move_queue_elemenets(Flash_Transaction_Queue *source, Flash_Transaction_Queue *target) {
+		// Appends the elements of source to target and removes them from source.
+		Flash_Transaction_Queue::iterator it = source->begin();
+		while (it != source->end()) {
+			target->push_back(*it);
+			source->remove(it);
+
+			it = source->begin();
+		}
+	}
+
+	bool TSU_Base::issue_command_to_chip(NVM::FlashMemory::Flash_Chip* chip, Flash_Transaction_Queue* sourceQueue1, Flash_Transaction_Queue* sourceQueue2, Transaction_Type transactionType, bool suspensionRequired)
 	{
-		//flash_die_ID_type dieID = sourceQueue1->front()->Address.DieID;
-		//flash_page_ID_type pageID = sourceQueue1->front()->Address.PageID;
 		unsigned int planeVector = 0;
 		static int issueCntr = 0;
 
 		Flash_Transaction_Queue* mainQueue = sourceQueue1;
-		Flash_Transaction_Queue* subQueue = sourceQueue2;
+		Flash_Transaction_Queue* gcQueue = sourceQueue2;
 
-		if (sourceQueue2 != NULL && transaction_dispatch_slots.size() < plane_no_per_die) {
-			switch (sourceQueue2->front()->Source) {
+		if (ftl->GC_and_WL_Unit->GC_is_in_urgent_mode(chip)) {
+			// Leave the urgent order, add User IO after GC.
+			move_queue_elemenets(gcQueue, mainQueue);
+		} else {
+			mainQueue = sourceQueue1;
+			gcQueue = sourceQueue2;
+
+
+			if (gcQueue != NULL && transaction_dispatch_slots.size() < plane_no_per_die) {
+				switch (gcQueue->front()->Source) {
 				case Transaction_Source_Type::GC_WL:
-					/*
-					if (sourceQueue2->size() > sourceQueue1->size()) {
-						mainQueue = sourceQueue2;
-						subQueue = sourceQueue1;
-
-						mainQueue->front() = subQueue->front();
-						subQueue->remove(subQueue->front());
-					}*/
-
+					// Triggered: sourceQueue1 is User IO, sourceQueue2 is GC
+					// Inserts the gcQueue elements after every 2nd element of the mainQueue
 					for (Flash_Transaction_Queue::iterator it = mainQueue->begin(); it != mainQueue->end(); it++) {
 						int index = std::distance(mainQueue->begin(), it);
 
-						if (index % 2 && !subQueue->empty()) {
-							mainQueue->insert(it, subQueue->front());
-							subQueue->remove(subQueue->front());
+						if (index % 2 && !gcQueue->empty()) {
+							mainQueue->insert(it, gcQueue->front());
+							gcQueue->remove(gcQueue->front());
 						}
 
-						if (subQueue->empty()) {
+						if (gcQueue->empty()) {
 							break;
 						}
 					}
 
-					while (!subQueue->empty()) {
-						mainQueue->push_back(subQueue->front());
-						subQueue->remove(subQueue->front());
+					// Inserts the rest of the gcQueue after the mainQueue
+					if (!gcQueue->empty()) {
+						move_queue_elemenets(gcQueue, mainQueue);
 					}
-				
-				break;
-			default:
-				for (Flash_Transaction_Queue::iterator it = subQueue->begin(); it != subQueue->end(); it++) {
-					mainQueue->push_back(*it);
-					subQueue->remove(it);
-				}
 
-				break;
+					break;
+				default:
+					// Triggered: sourceQueue1 and sourceQueue2 have User IO
+					// Default behaviour, inserts the subQueue after the mainQueue
+					move_queue_elemenets(gcQueue, mainQueue);
+
+					break;
+				}
 			}
 		}
 
